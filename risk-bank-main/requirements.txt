@@ -1,0 +1,11 @@
+numpy
+pandas
+scikit-learn
+matplotlib
+openpyxl
+xlrd
+ucimlrepo
+torch
+fastapi
+uvicorn
+joblib

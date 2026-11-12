@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Risk Bank – Análise de inadimplência</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div class="app">
+<aside class="nav">
+  <div class="logo"><svg viewBox="0 0 28 28" aria-hidden="true" focusable="false">
+      <path fill-rule="evenodd" d="M1 4h7l4 4v5l-3 3 4 8H8.5L5 17v7H1zm4 4v5h2l1-1V9L7 8zM15 4h8l3 3v5l-2 2 3 3v4l-3 3h-9zm4 4v4h2l1-1V9l-1-1zm0 8v4h3l1-1v-2l-1-1z"/>
+    </svg>Risk Bank</div>
+  <nav aria-label="Navegação principal">
+    <a href="#painel" aria-current="location"><span aria-hidden="true">▦</span> Painel</a>
+    <a href="#analises"><span aria-hidden="true">◔</span> Análises</a>
+    <a href="#clientes"><span aria-hidden="true">☰</span> Clientes</a>
+    <a href="#historico"><span aria-hidden="true">⇄</span> Histórico</a>
+    <button type="button" id="abrir-ajuda" aria-haspopup="dialog" aria-controls="ajuda"><span aria-hidden="true">?</span> Ajuda</button>
+  </nav>
+</aside>
+<main class="main" id="painel" tabindex="-1">
+  <div class="top">
+    <div class="top-label">Análise de crédito</div>
+    <div class="user"><div class="av">EQ</div><div>Equipe IA<small>Analista</small></div></div>
+  </div>
+  <h1>Olá, equipe!</h1>
+  <p class="lead">Informe o histórico do cliente para estimar o risco de inadimplência no mês seguinte.</p>
+  <div class="note"><strong>Modo demonstração.</strong> Estimativa acadêmica baseada em uma regra simples. Use apenas para explorar o painel.</div>
+  <div class="grid">
+  <div>
+    <section class="card" id="clientes" tabindex="-1" aria-labelledby="clientes-titulo"><h2 id="clientes-titulo">Dados do cliente</h2>
+      <div class="g">
+        <label>Limite de crédito (NT$)<input id="limit" type="number" min="0" value="50000"></label>
+        <label>Idade<input id="age" type="number" min="18" max="100" value="35"></label>
+        <label>Sexo<select id="sex"><option value="1">Masculino</option><option value="2">Feminino</option></select></label>
+        <label>Escolaridade<select id="edu"><option value="1">Pós-graduação</option><option value="2" selected>Universidade</option><option value="3">Ensino médio</option><option value="4">Outro</option></select></label>
+        <label>Estado civil<select id="mar"><option value="1">Casado(a)</option><option value="2" selected>Solteiro(a)</option><option value="3">Outro</option></select></label>
+      </div>
+      <div class="scroll" tabindex="0" role="region" aria-label="Histórico mensal de pagamentos"><div class="months" id="months"></div></div>
+      <div class="row">
+        <button class="btn" id="run">Analisar cliente</button>
+        <button class="btn alt" data-preset="good">Exemplo: bom pagador</button>
+        <button class="btn alt" data-preset="bad">Exemplo: risco alto</button>
+      </div>
+    </section>
+    <div class="card"><h2>Faturas e pagamentos <span>Abr – Set 2005</span></h2>
+      <div class="legend"><span><b class="legend-bill"></b>Fatura</span><span><b class="legend-paid"></b>Pago</span></div>
+      <svg id="chart" viewBox="0 0 560 190" width="100%" role="img" aria-label="Gráfico de faturas e pagamentos por mês"></svg>
+    </div>
+  </div>
+  <div>
+    <section class="card" id="analises" tabindex="-1" aria-labelledby="resultado-titulo"><h2 id="resultado-titulo">Resultado</h2>
+      <svg class="gauge" viewBox="0 0 200 112" role="img" aria-label="Medidor de risco">
+        <path d="M20 100A80 80 0 0 1 180 100" fill="none" stroke="#ececee" stroke-width="14"/>
+        <path id="arc" d="M20 100A80 80 0 0 1 180 100" fill="none" stroke="#111" stroke-width="14" pathLength="100" stroke-dasharray="0 100"/>
+      </svg>
+      <div aria-live="polite" aria-atomic="true">
+        <div class="pct" id="pct">–</div>
+        <div class="verdict" id="verdict">Aguardando análise</div>
+        <p class="sub" id="sub">Preencha os dados e clique em analisar.</p>
+      </div>
+      <ul class="list" id="fx"></ul>
+      <div class="thr"><label>Classificar como inadimplente a partir de <b id="thv">35%</b>
+        <input id="thr" type="range" min="10" max="90" value="35"></label>
+        Limite menor encontra mais inadimplentes (recall maior), mas gera mais alarmes falsos.</div>
+    </section>
+    <section class="card" id="historico" tabindex="-1" aria-labelledby="historico-titulo">
+      <h2 id="historico-titulo">Análises recentes</h2>
+      <ul class="list" id="hist"><li><small>Nenhuma análise ainda.</small></li></ul>
+    </section>
+  </div>
+  </div>
+</main>
+  <dialog class="card help" id="ajuda" aria-labelledby="ajuda-titulo">
+    <h2 id="ajuda-titulo">Ajuda</h2>
+    <p>Preencha os dados do cliente e os seis meses de pagamentos. Clique em <strong>Analisar cliente</strong> ou use um dos exemplos para experimentar.</p>
+    <p>Em <strong>Análises</strong>, veja a estimativa de risco e ajuste o limite para comparar classificações. O ajuste não muda a probabilidade estimada.</p>
+    <p>O <strong>Histórico</strong> mostra até cinco análises desta sessão e é limpo ao recarregar a página.</p>
+    <form method="dialog"><button class="btn" autofocus>Fechar</button></form>
+  </dialog>
+</div>
+<script src="./app.js"></script>
+</body>
+</html>
