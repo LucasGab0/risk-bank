@@ -1,143 +1,180 @@
 # Risk Bank
 
-Aplicativo web para estimar o risco de um cliente de cartão de crédito deixar de pagar a fatura no mês seguinte.
+Aplicação e pesquisa sobre previsão de inadimplência de cartão de crédito. A entrega inclui os dados oficiais, modelos treinados, experimentos P1–P4, calibração, código, testes e PDFs atualizados.
 
-Projeto da disciplina de Inteligência Artificial (Ciência da computação, UNIMA), desenvolvido por Athos Andre, Lucas Brasileiro, Guilherme Uchoa, Matheus Albuquerque e Dhigor Padilha.
+Projeto atribuído no repositório a Athos Andre, Lucas Brasileiro, Guilherme Uchoa, Matheus Albuquerque e Dhigor Padilha. Os documentos recebidos foram preservados em `docs/originais/`.
 
-> **Aviso:** este é um estudo acadêmico. Os resultados não devem ser usados para decidir crédito real sem validação adicional.
+## Abrir a aplicação
 
-## Sobre
+Use Python 3.11 ou superior. O ambiente validado é Python 3.12 no Linux. Extraia o ZIP e abra um terminal na pasta que contém `main.py`.
 
-Instituições financeiras concedem crédito sem saber de antemão se o cliente conseguirá pagar. Quando isso não acontece, ocorre a inadimplência, que gera prejuízo e influencia limites de crédito e políticas de cobrança.
+```bash
+python -m venv .venv
+```
 
-O Risk Bank recebe o histórico de um cliente e devolve a **probabilidade de inadimplência no mês seguinte**, junto com uma classificação (provável bom pagador ou provável inadimplente) e os fatores que mais pesaram no resultado.
+Ative o ambiente:
 
-## Funcionalidades
+```bash
+# Linux/macOS
+source .venv/bin/activate
+```
 
-- Formulário com o perfil do cliente e o histórico dos últimos seis meses.
-- Medidor com a probabilidade de inadimplência e o veredito.
-- Lista dos três fatores que mais influenciaram o resultado.
-- Gráfico de faturas e pagamentos por mês, atualizado enquanto você digita.
-- Controle do limite de classificação, para escolher o quanto o app deve ser rigoroso.
-- Histórico das análises recentes da sessão.
-- Dois exemplos prontos (bom pagador e risco alto) para testar rapidamente.
+```powershell
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+```
 
-## Como usar
+Instale e execute:
 
-O frontend é um único arquivo, sem instalação nem build.
+```bash
+python -m pip install -r requirements.txt
+python main.py --serve
+```
 
-1. Abra o `index.html` no navegador.
-2. Preencha o perfil do cliente (limite, idade, sexo, escolaridade e estado civil).
-3. Informe, para cada mês de abril a setembro, a situação de pagamento, o valor da fatura e o valor pago.
-4. Clique em **Analisar cliente**.
-5. Leia o resultado no painel da direita. Ajuste o limite de classificação se quiser um critério mais ou menos rigoroso.
+Abra **http://127.0.0.1:8000**. Os modelos já estão treinados; não é necessário instalar PyTorch nem repetir a pesquisa para usar a aplicação. Após a instalação, a aplicação e a pesquisa com a base incluída funcionam sem internet. Abra a interface pelo servidor, não diretamente pelo `index.html`.
 
-Para ver um exemplo, use os botões "Exemplo: bom pagador" e "Exemplo: risco alto".
+A tela oferece regressão logística, XGBoost e MLP scikit-learn, histórico da sessão e análise de sensibilidade calculada pelo modelo. Não há previsão por regra manual caso o artefato falhe.
 
-### Situação de pagamento
+## Pesquisa completa executada
 
-| Valor | Significado |
+Foram realizados **140 ajustes**, correspondentes a **28 configurações em cinco sementes: 7, 21, 42, 84 e 123**.
+
+| Experimento | Comparações |
 |---|---|
-| Sem consumo | O cliente não usou o cartão no mês |
-| Pago em dia | A fatura foi quitada |
-| Uso rotativo | Pagou parte da fatura e manteve saldo |
-| 1 a 8+ meses | Meses de atraso no pagamento |
+| P1: modelos | Regressão logística, SVM linear calibrada, kNN L1/L2, random forest, XGBoost e MLP |
+| P2: redes | Largura 32/128, duas ou três camadas, ReLU, tanh e sigmoide |
+| P3: regularização | L2, dropout, batch normalization, combinações, peso de classe e sobreamostragem |
+| P4: preparação | Com/sem normalização, com/sem one-hot, inicialização padrão, Xavier e Kaiming |
+| Calibração | Probabilidades originais, sigmoide e isotônica nos três modelos da aplicação |
+| Sensibilidade a atributos | Os três modelos com e sem sexo, idade e estado civil |
+| Incerteza e custo | Dispersão entre sementes, intervalos bootstrap por perfil e cenários ilustrativos de custo |
 
-### Limite de classificação
+As 45 avaliações de calibração reaproveitam predições dos classificadores; não são 45 novos ajustes dos modelos base. As redes PyTorch foram treinadas em CPU de forma determinística, com até 80 épocas e parada antecipada.
 
-O app transforma a probabilidade em uma decisão comparando-a com um limite (padrão de 35%).
+O conjunto de referência é o mesmo já consultado na primeira etapa: **não é apresentado como teste inédito**. Ele é mantido fora de todos os novos ajustes, calibração, seleção e escolha de limiares. O desenvolvimento é dividido por perfil em `fit`, `stop`, `calibration` e `validation`; perfis idênticos não atravessam partições. O scaler e o encoder são ajustados apenas em `fit`.
 
-- **Limite menor:** encontra mais clientes inadimplentes (recall maior), mas gera mais alarmes falsos.
-- **Limite maior:** reduz os alarmes falsos, mas deixa passar mais inadimplentes.
+## Resultados atuais
 
-## Como funciona
+Métricas abaixo: **média ± desvio da AP de validação**, antes do ajuste adicional de calibração.
 
-O app segue o desenho de um problema de classificação binária supervisionada: a partir das 23 variáveis do histórico do cliente, o modelo estima a chance da classe "inadimplente".
+| Modelo | AP média ± desvio |
+|---|---:|
+| Regressão logística | 0,495 ± 0,012 |
+| SVM linear | 0,492 ± 0,012 |
+| kNN L1 | 0,483 ± 0,010 |
+| kNN L2 | 0,491 ± 0,010 |
+| Random forest | 0,543 ± 0,016 |
+| XGBoost | 0,543 ± 0,009 |
+| MLP scikit-learn | 0,538 ± 0,011 |
+| Melhor rede PyTorch: 64/32, tanh | 0,543 ± 0,011 |
 
-### Variáveis de entrada
+Os melhores candidatos ficaram próximos. O XGBoost foi selecionado entre **os três modelos integrados à aplicação**, pela maior AP média de validação; não foi declarado vencedor de todas as configurações. A rede tanh liderou as 18 redes PyTorch e está salva como artefato de pesquisa separado.
 
-| Grupo | Descrição | Quantidade |
-|---|---|---|
-| Limite de crédito | Valor do crédito concedido | 1 |
-| Perfil | Sexo, escolaridade, estado civil e idade | 4 |
-| Histórico de pagamento | Situação do pagamento de abril a setembro de 2005 | 6 |
-| Valores das faturas | Valor da fatura em cada um dos seis meses | 6 |
-| Valores pagos | Valor pago em cada um dos seis meses | 6 |
+A calibração usa o menor Brier médio de validação. A aplicação recebeu **isotônica na regressão logística**, **nenhum ajuste adicional no XGBoost** e **sigmoide na MLP scikit-learn**. Reduzir Brier não garante melhorar log loss, AP e recall simultaneamente.
 
-### Modelos
+Na avaliação complementar da referência, o XGBoost final teve AUC-ROC **0,768**, AP **0,529**, F1 **0,525** e recall **0,512**, com limiar validado de aproximadamente **0,299**. Foram identificados 509 dos 995 inadimplentes; 486 não foram detectados. Não houve seleção usando esses resultados.
 
-O estudo compara modelos de complexidade crescente:
+Os limiares maximizam F1 na validação da semente 42. As métricas exibidas na tela usam esse limiar exato. O controle visual arredonda para 0,1 ponto percentual; alterar o controle muda a classificação, sem recalcular as métricas da referência.
 
-| Modelo | Papel |
-|---|---|
-| kNN (distâncias L1 e L2) | Baseline sem aprendizado |
-| Classificador linear (softmax e SVM loss) | Baseline linear |
-| MLP com 1 camada escondida | Primeira não linearidade |
-| MLP profundo com L2, dropout e batch normalization | Modelo de maior capacidade |
-| Random forest (opcional) | Referência externa para dados tabulares |
+## Reproduzir os experimentos e PDFs
 
-### Avaliação
+Instale as dependências opcionais de pesquisa. O arquivo usa o índice oficial de CPU do PyTorch; o pacote sem sufixo CPU é usado no macOS.
 
-Como apenas cerca de 22% dos clientes são inadimplentes, um modelo que classificasse todos como bons pagadores já teria cerca de 78% de acurácia sem aprender nada. Por isso a avaliação usa **recall, precisão, F1, AUC-ROC e matriz de confusão**, e a acurácia serve só de referência.
+```bash
+python -m pip install -r requirements-research.txt
+python main.py
+python build_report.py
+```
 
-### Estado atual da previsão
+`python main.py` executa a pesquisa completa com integração e retomada. Os resultados já incluídos são reconhecidos pelo protocolo e reaproveitados; os modelos finais são reproduzidos e as equivalências com as predições registradas são verificadas. Não altere os arquivos de cache para combinar protocolos diferentes.
 
-A versão atual da interface usa uma **regra simples escrita à mão** no lugar do modelo treinado, e a tela exibe um aviso de "Modo demonstração". A regra considera os atrasos de pagamento (com mais peso nos meses recentes), o tamanho da fatura em relação ao limite, a parcela paga da fatura anterior e o limite de crédito.
+Comando explícito equivalente:
 
-O resultado, portanto, serve para demonstrar a interface e não deve ser tomado como previsão do modelo.
+```bash
+python research.py --integrate --resume
+```
 
-## Integração com o modelo
+Para um novo experimento em outra pasta:
 
-A previsão fica isolada na função `predict(x)` do `index.html`. Para conectar um modelo treinado, basta substituí-la por uma chamada à API.
+```bash
+python research.py --output results/outro_estudo --seeds 7 21 42 84 123 --epochs 80
+```
 
-**Requisição:** `POST /predict`
+Esse comando produz um artefato `application_models.joblib` nessa pasta. Sem `--integrate`, preserva os modelos ativos. O gerador de PDFs lê a pesquisa padrão em `results/research/`. Para um arquivo próprio, use `--data caminho/arquivo.csv`; são aceitos CSV, CSV gzip, XLS e XLSX compatíveis com o esquema UCI.
+
+`train.py` preserva a comparação inicial rápida, de uma semente e sem calibração adicional. Use uma pasta separada para não substituir os modelos finais da aplicação:
+
+```bash
+python train.py --output results/baseline_rapido
+```
+
+A rede de pesquisa usa PyTorch; a MLP servida pela API usa scikit-learn. Nenhum objeto PyTorch é necessário ao servidor. Os pesos da melhor rede experimental, seu pré-processador e sua configuração estão em `results/research/best_neural_*`.
+
+## Documentos
+
+- `docs/Previsão de Inadimplência de Crédito com Redes Neurais.pdf`: relatório completo, 12 páginas.
+- `docs/proposta_pesquisa_inadimplencia.pdf`: síntese atualizada dos experimentos, 4 páginas.
+- `docs/apresentacao_resultados.pdf`: apresentação de resultados, 16 slides.
+- `PESQUISA.md`: fonte textual com os resultados e as figuras.
+- `RELATORIO.md`: diagnóstico da entrega e registro das pendências concluídas.
+- `docs/originais/`: PDFs recebidos, preservados com seus hashes.
+
+O relatório responde P1–P4 com os experimentos executados, incluindo resultados que não melhoraram e limites das conclusões. Os intervalos entre sementes são descritivos porque as partições se sobrepõem. Os intervalos bootstrap da referência são condicionais ao modelo ajustado, não à transferência para outra população.
+
+## Testes
+
+```bash
+python -m pip install -r requirements-research.txt
+python -m pytest -q
+```
+
+A validação completa está registrada em `results/pytest.txt`. Os testes de pesquisa e de PDFs são opcionais quando PyTorch e pypdf não estão instalados; nesse caso o pytest informa os módulos ignorados. Para somente os testes da aplicação, instale `requirements-dev.txt`.
+
+Navegador:
+
+```bash
+python -m playwright install chromium
+python tests/browser_smoke.py
+# Ou com Chromium já instalado:
+python tests/browser_smoke.py --chromium /usr/bin/chromium
+```
+
+O script inicia e encerra seu próprio servidor. Aceita `--screenshots pasta` e `--report arquivo.json`. Os cenários e as probabilidades verificadas estão em `results/browser_tests.json`.
+
+`requirements-lock.txt` registra o ambiente inicial de aplicação/testes; `requirements-research-lock.txt` registra o ambiente completo da pesquisa, ambos com versões fixadas. Carregue apenas artefatos joblib confiáveis. Ao mudar as versões do scikit-learn ou XGBoost, treine novamente.
+
+## API
+
+- `GET /health`: estado de carregamento.
+- `GET /models`: modelos, limiares, calibração e métricas.
+- `GET /metrics`: relatório do modelo carregado e escolhas da pesquisa.
+- `POST /predict`: previsão e sensibilidade.
+- `GET /docs`: documentação interativa.
 
 ```json
 {
   "limit": 50000, "age": 35, "sex": 1, "edu": 2, "mar": 2,
-  "pay":  [0, 0, 0, 0, 0, 0],
+  "pay": [0, 0, 0, 0, 0, 0],
   "bill": [20000, 20000, 20000, 20000, 20000, 20000],
-  "paid": [2000, 2000, 2000, 2000, 2000, 2000]
+  "paid": [2000, 2000, 2000, 2000, 2000, 2000],
+  "model": "xgboost", "threshold": 0.299
 }
 ```
 
-**Resposta:**
+`model` e `threshold` são opcionais. Os arrays seguem **setembro, agosto, julho, junho, maio, abril de 2005**. Os valores são em **NT$**, não em reais. Sexo: 1 masculino, 2 feminino. Escolaridade: 1 pós-graduação, 2 universidade, 3 ensino médio, 4 outro. Estado civil: 1 casado, 2 solteiro, 3 outro. Situação de pagamento: -2 sem consumo, -1 pago em dia, 0 rotativo, 1–8 meses de atraso.
 
-```json
-{
-  "prob": 0.31,
-  "factors": [{ "name": "Atrasos no pagamento", "value": 0.4 }]
-}
-```
+`prob` é a probabilidade estimada. `prediction` é 1 quando ela atinge o limiar. Os fatores comparam a previsão atual com a previsão após substituir um grupo pela mediana/moda de `fit`. `value` é uma diferença de probabilidades; a tela a mostra em pontos percentuais. Não são valores SHAP, efeitos causais nem uma decomposição aditiva. A substituição pode produzir combinações pouco comuns entre variáveis correlacionadas.
 
-- Os arrays `pay`, `bill` e `paid` seguem a ordem do dataset: índice 0 é setembro (mais recente) e índice 5 é abril (mais antigo).
-- `prob` é a probabilidade de inadimplência, entre 0 e 1.
-- Em `factors`, valores positivos aumentam o risco e negativos reduzem.
-- Codificação das categorias: sexo (1 masculino, 2 feminino), escolaridade (1 pós-graduação, 2 universidade, 3 ensino médio, 4 outro) e estado civil (1 casado, 2 solteiro, 3 outro).
+Artefato ausente ou corrompido: HTTP 503, sem resultado substituto. Alterar dados ou modelo limpa a previsão anterior. O histórico pertence apenas à sessão da página. Reinicie o servidor após gerar um novo artefato. A variável `RISK_BANK_MODEL` permite apontar para outro arquivo de modelos compatível.
 
-Mais detalhes para quem for desenvolver estão no [`CONTEXT.md`](CONTEXT.md).
+## Arquivos da pesquisa
 
-## Dataset
+`protocol.json`: desenho registrado; `experiments.csv`: 140 ajustes; `summary.csv`: médias e desvios; `paired_differences.csv`: diferenças contra a rede de controle; `learning_curves.csv` e `convergence.csv`: perdas e melhores épocas; `calibration.csv`: 45 avaliações; `selection_locked.json`: escolhas por validação; `final_evaluation.json`: referência e intervalos; `cost_scenarios.csv`: custos ilustrativos; `split_seed_*.npz`: índices; `runs/`: predições de calibração e validação por execução. Tudo fica em `results/research/`.
 
-*Default of Credit Card Clients*, do UCI Machine Learning Repository, criado por I-Cheng Yeh e Che-hui Lien (2009).
+Os resultados da primeira etapa foram preservados em `results/initial_baseline/`. Os arquivos na raiz de `results/` correspondem aos modelos finais calibrados.
 
-- 30.000 clientes de um banco de Taiwan, com dados de abril a setembro de 2005.
-- 23 variáveis explicativas, sem valores faltantes segundo a documentação.
-- Alvo binário: inadimplente no mês seguinte (1) ou não (0).
-- Cerca de 22,1% dos clientes são inadimplentes.
-- Licença: Creative Commons Attribution 4.0 (CC BY 4.0).
+## Fonte e limitações
 
-## Limitações e ética
+Yeh, I-Cheng; Lien, Che-hui. *Default of Credit Card Clients*. UCI Machine Learning Repository, 2009. DOI: https://doi.org/10.24432/C55S3H. Base sob licença [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Origem, conversão e hashes em `data/source.json`. Fontes tipográficas DejaVu incluídas com licença em `assets/fonts/`.
 
-- Os dados são de 2005 e de um único banco de Taiwan, então os resultados não se generalizam automaticamente para outros países ou épocas.
-- O dataset inclui sexo, idade e estado civil, o que traz risco de viés e de discriminação. Por isso o desempenho deve ser analisado por grupo.
-- O app é um estudo acadêmico e não substitui análise de crédito real.
-
-## Referências
-
-- ABU-MOSTAFA, Y. S.; MAGDON-ISMAIL, M.; LIN, H.-T. *Learning From Data*. AMLBook, 2012.
-- IOFFE, S.; SZEGEDY, C. Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift. In: ICML, 2015.
-- SRIVASTAVA, N. et al. Dropout: A Simple Way to Prevent Neural Networks from Overfitting. *Journal of Machine Learning Research*, v. 15, p. 1929-1958, 2014.
-- YEH, I.-C.; LIEN, C.-H. The comparisons of data mining techniques for the predictive accuracy of probability of default of credit card clients. *Expert Systems with Applications*, v. 36, n. 2, p. 2473-2480, 2009.
-- YEH, I. *Default of Credit Card Clients* [Dataset]. UCI Machine Learning Repository, 2009. https://doi.org/10.24432/C55S3H.
-- ZANCHETTIN, C. Revisão ML + NN. Material de aula, Centro de Informática, UFPE.
+Os dados são de um banco de Taiwan em 2005. A análise de grupos e a remoção de atributos sensíveis não demonstram ausência de discriminação. Custos de erros são cenários hipotéticos. Não houve validação externa recente ou temporal; esses resultados não estabelecem desempenho em crédito brasileiro atual.

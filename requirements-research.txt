@@ -1,0 +1,6 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+-r requirements-dev.txt
+torch==2.10.0+cpu; sys_platform != "darwin"
+torch==2.10.0; sys_platform == "darwin"
+reportlab==4.5.1
+pypdf==6.21.4

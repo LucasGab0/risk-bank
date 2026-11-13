@@ -100,3 +100,10 @@ dialog.help[open]::backdrop{animation:backdrop-enter 180ms ease-out both}
 .legend-bill{background:#111}
 .legend-paid{background:#c9c9cd}
 #thv{color:#111}
+
+.btn:disabled{opacity:.55;cursor:wait}
+.note.error{color:#9f2525;border-color:#9f2525}
+.model-metrics,.factor-note{font-size:11px;color:var(--mut);line-height:1.6}
+.factor-title{font-size:12px;margin:18px 0 4px}
+#fx b{white-space:nowrap}
+.list li>span:first-child{min-width:0;overflow-wrap:anywhere}

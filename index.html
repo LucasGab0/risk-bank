@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Risk Bank – Análise de inadimplência</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="./style.css">
 </head>
 <body>
@@ -24,24 +23,24 @@
 <main class="main" id="painel" tabindex="-1">
   <div class="top">
     <div class="top-label">Análise de crédito</div>
-    <div class="user"><div class="av">EQ</div><div>Equipe IA<small>Analista</small></div></div>
+    <div class="user"><div class="av">EQ</div><div>Equipe de crédito<small>Analista</small></div></div>
   </div>
-  <h1>Olá, equipe!</h1>
+  <h1>Análise de inadimplência</h1>
   <p class="lead">Informe o histórico do cliente para estimar o risco de inadimplência no mês seguinte.</p>
-  <div class="note"><strong>Modo demonstração.</strong> Estimativa acadêmica baseada em uma regra simples. Use apenas para explorar o painel.</div>
+  <div class="note" id="status" role="status" aria-live="polite">Carregando modelos treinados…</div>
   <div class="grid">
   <div>
     <section class="card" id="clientes" tabindex="-1" aria-labelledby="clientes-titulo"><h2 id="clientes-titulo">Dados do cliente</h2>
       <div class="g">
-        <label>Limite de crédito (NT$)<input id="limit" type="number" min="0" value="50000"></label>
-        <label>Idade<input id="age" type="number" min="18" max="100" value="35"></label>
+        <label>Limite de crédito (NT$)<input id="limit" type="number" min="0.01" step="0.01" required value="50000"></label>
+        <label>Idade<input id="age" type="number" min="18" max="100" step="1" required value="35"></label>
         <label>Sexo<select id="sex"><option value="1">Masculino</option><option value="2">Feminino</option></select></label>
         <label>Escolaridade<select id="edu"><option value="1">Pós-graduação</option><option value="2" selected>Universidade</option><option value="3">Ensino médio</option><option value="4">Outro</option></select></label>
         <label>Estado civil<select id="mar"><option value="1">Casado(a)</option><option value="2" selected>Solteiro(a)</option><option value="3">Outro</option></select></label>
       </div>
       <div class="scroll" tabindex="0" role="region" aria-label="Histórico mensal de pagamentos"><div class="months" id="months"></div></div>
       <div class="row">
-        <button class="btn" id="run">Analisar cliente</button>
+        <button class="btn" id="run" disabled>Analisar cliente</button>
         <button class="btn alt" data-preset="good">Exemplo: bom pagador</button>
         <button class="btn alt" data-preset="bad">Exemplo: risco alto</button>
       </div>
@@ -53,6 +52,8 @@
   </div>
   <div>
     <section class="card" id="analises" tabindex="-1" aria-labelledby="resultado-titulo"><h2 id="resultado-titulo">Resultado</h2>
+      <label>Modelo<select id="model" disabled><option>Carregando…</option></select></label>
+      <p class="model-metrics" id="model-metrics"></p>
       <svg class="gauge" viewBox="0 0 200 112" role="img" aria-label="Medidor de risco">
         <path d="M20 100A80 80 0 0 1 180 100" fill="none" stroke="#ececee" stroke-width="14"/>
         <path id="arc" d="M20 100A80 80 0 0 1 180 100" fill="none" stroke="#111" stroke-width="14" pathLength="100" stroke-dasharray="0 100"/>
@@ -62,9 +63,11 @@
         <div class="verdict" id="verdict">Aguardando análise</div>
         <p class="sub" id="sub">Preencha os dados e clique em analisar.</p>
       </div>
+      <h3 class="factor-title">Sensibilidade ao perfil de referência</h3>
       <ul class="list" id="fx"></ul>
-      <div class="thr"><label>Classificar como inadimplente a partir de <b id="thv">35%</b>
-        <input id="thr" type="range" min="10" max="90" value="35"></label>
+      <p class="factor-note">Diferença em pontos percentuais ao substituir um grupo pela mediana/moda do treino. Valores não são aditivos nem indicam causa.</p>
+      <div class="thr"><label>Classificar como inadimplente a partir de <b id="thv">–</b>
+        <input id="thr" type="range" min="0" max="100" step="0.1" value="35"></label>
         Limite menor encontra mais inadimplentes (recall maior), mas gera mais alarmes falsos.</div>
     </section>
     <section class="card" id="historico" tabindex="-1" aria-labelledby="historico-titulo">
@@ -78,6 +81,9 @@
     <h2 id="ajuda-titulo">Ajuda</h2>
     <p>Preencha os dados do cliente e os seis meses de pagamentos. Clique em <strong>Analisar cliente</strong> ou use um dos exemplos para experimentar.</p>
     <p>Em <strong>Análises</strong>, veja a estimativa de risco e ajuste o limite para comparar classificações. O ajuste não muda a probabilidade estimada.</p>
+    <p>Escolha entre regressão logística, XGBoost e rede neural MLP. O padrão foi selecionado pela média da precisão média (AP) de validação em cinco sementes. Os três modelos usam a calibração escolhida pelo Brier de validação. As métricas exibidas são da referência já consultada e usam o limiar validado da semente 42.</p>
+    <p>Os valores monetários são em novos dólares taiwaneses (NT$), conforme a base de abril a setembro de 2005. Este é um estudo acadêmico.</p>
+    <p>Os fatores comparam a previsão atual com a previsão após substituir um grupo de dados pela referência do treino. Eles não são uma decomposição da probabilidade.</p>
     <p>O <strong>Histórico</strong> mostra até cinco análises desta sessão e é limpo ao recarregar a página.</p>
     <form method="dialog"><button class="btn" autofocus>Fechar</button></form>
   </dialog>
