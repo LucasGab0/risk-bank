@@ -1,0 +1,13 @@
+{
+  "name": "Default of Credit Card Clients",
+  "authors": "I-Cheng Yeh; Che-hui Lien",
+  "year": 2009,
+  "url": "https://archive.ics.uci.edu/dataset/350/default+of+credit+card+clients",
+  "download_url": "https://archive.ics.uci.edu/static/public/350/default+of+credit+card+clients.zip",
+  "doi": "10.24432/C55S3H",
+  "license": "CC BY 4.0",
+  "original_file": "default of credit card clients.xls",
+  "original_sha256": "30c6be3abd8dcfd3e6096c828bad8c2f011238620f5369220bd60cfc82700933",
+  "csv_gz_sha256": "e16a2a45bc3bdf116f5d2747ba033d7962c662352320f1f1b44cd146aa03757b",
+  "conversion": "Planilha original lida com header=1 e exportada para CSV gzip; sem alteração de linhas ou valores."
+}

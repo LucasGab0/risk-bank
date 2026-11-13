@@ -1,254 +1,181 @@
+"""API de inferência e arquivos da interface Risk Bank."""
+from contextlib import asynccontextmanager
+import logging
 import os
-import sys
 from pathlib import Path
-from typing import List
+from typing import Annotated, Literal
 
+import joblib
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
-import joblib
-import torch
-import torch.nn as nn
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
+from threadpoolctl import threadpool_limits
 
-# Diretório base do projeto
-BASE_DIR = Path(__file__).resolve().parent
+from data import BASE_DIR, FEATURES, clean_features
 
-# Definição da arquitetura MLP para inferência
-class MLP(nn.Module):
-    def __init__(
-        self,
-        input_size: int,
-        hidden_layers=(128, 64, 32),
-        activation: str = "relu",
-        dropout: float = 0.0,
-        batch_norm: bool = True,
-    ):
-        super().__init__()
-        layers = []
-        tamanho_entrada = input_size
-        act_cls = nn.ReLU if activation == "relu" else (nn.Tanh if activation == "tanh" else nn.Sigmoid)
-
-        for tamanho_oculta in hidden_layers:
-            layers.append(nn.Linear(tamanho_entrada, tamanho_oculta))
-            if batch_norm:
-                layers.append(nn.BatchNorm1d(tamanho_oculta))
-            layers.append(act_cls())
-            if dropout > 0:
-                layers.append(nn.Dropout(dropout))
-            tamanho_entrada = tamanho_oculta
-
-        layers.append(nn.Linear(tamanho_entrada, 1))
-        self.rede = nn.Sequential(*layers)
-
-    def forward(self, x):
-        return self.rede(x)
+logger = logging.getLogger(__name__)
+ModelKey = Literal['logistic', 'xgboost', 'mlp']
+MODEL_NAMES = {'logistic': 'Regressão logística', 'xgboost': 'XGBoost', 'mlp': 'Rede neural MLP'}
+EXPLANATION_METHOD = 'Variação da probabilidade em relação à substituição de um grupo pela mediana/moda do treino. Os valores não são aditivos nem causais.'
+PayStatus = Annotated[int, Field(strict=True, ge=-2, le=8)]
+Money = Annotated[float, Field(allow_inf_nan=False)]
+PaidAmount = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 
 
-app = FastAPI(
-    title="Risk Bank API",
-    description="Backend para previsão de risco de inadimplência de crédito",
-    version="1.0.0",
-)
+class PredictRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid', allow_inf_nan=False, strict=True)
+    limit: Annotated[float, Field(gt=0)]
+    age: Annotated[int, Field(strict=True, ge=18, le=100)]
+    sex: Annotated[int, Field(ge=1, le=2)]
+    edu: Annotated[int, Field(ge=1, le=4)]
+    mar: Annotated[int, Field(ge=1, le=3)]
+    pay: Annotated[list[PayStatus], Field(min_length=6, max_length=6)]
+    bill: Annotated[list[Money], Field(min_length=6, max_length=6)]
+    paid: Annotated[list[PaidAmount], Field(min_length=6, max_length=6)]
+    model: ModelKey | None = None
+    threshold: Annotated[float | None, Field(ge=0, le=1)] = None
 
-# Configuração de CORS para permitir acesso local ou via rede
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    def to_frame(self):
+        values = [self.limit, self.sex, self.edu, self.mar, self.age, *self.pay, *self.bill, *self.paid]
+        return clean_features(pd.DataFrame([values], columns=FEATURES))
 
-# Esquemas de dados
+
 class Factor(BaseModel):
     name: str
     value: float
 
-class PredictRequest(BaseModel):
-    limit: float = Field(..., description="Limite de crédito (NT$)")
-    age: int = Field(..., description="Idade do cliente")
-    sex: int = Field(..., description="1 = Masculino, 2 = Feminino")
-    edu: int = Field(..., description="1 = Pós-graduação, 2 = Universidade, 3 = Ensino Médio, 4 = Outro")
-    mar: int = Field(..., description="1 = Casado, 2 = Solteiro, 3 = Outro")
-    pay: List[int] = Field(..., min_length=6, max_length=6, description="Status de pagamento de Set a Abr (6 meses)")
-    bill: List[float] = Field(..., min_length=6, max_length=6, description="Valores das faturas de Set a Abr (6 meses)")
-    paid: List[float] = Field(..., min_length=6, max_length=6, description="Valores pagos de Set a Abr (6 meses)")
 
 class PredictResponse(BaseModel):
     prob: float
-    factors: List[Factor]
+    prediction: int
+    threshold: float
+    factors: list[Factor]
+    model_id: ModelKey
     model_used: str
+    explanation_method: str
 
-# Carregamento do modelo e pré-processador
-model_instance = None
-preprocessor_instance = None
-device = torch.device("cpu")
 
-def carregar_modelo():
-    global model_instance, preprocessor_instance
-    model_path = BASE_DIR / "results" / "mlp_profunda.pt"
-    prep_path = BASE_DIR / "results" / "preprocessor.joblib"
+FACTOR_GROUPS = [
+    ('Limite de crédito', ['LIMIT_BAL']),
+    ('Idade', ['AGE']), ('Sexo', ['SEX']),
+    ('Escolaridade', ['EDUCATION']), ('Estado civil', ['MARRIAGE']),
+    ('Histórico de atrasos', FEATURES[5:11]),
+    ('Histórico de faturas', FEATURES[11:17]),
+    ('Histórico de pagamentos', FEATURES[17:23]),
+]
 
-    if model_path.exists() and prep_path.exists():
+
+def load_bundle(path):
+    # Artefatos joblib devem vir somente do treinamento local ou desta entrega.
+    bundle = joblib.load(path)
+    if bundle.get('schema_version') != 1 or bundle.get('features') != FEATURES:
+        raise ValueError('Artefato com esquema incompatível; execute python train.py.')
+    if set(bundle['models']) != set(MODEL_NAMES) or bundle['selected_model'] not in MODEL_NAMES:
+        raise ValueError('Artefato incompleto.')
+    reference = clean_features(pd.DataFrame([bundle['reference']], columns=FEATURES))
+    with threadpool_limits(limits=2):
+        for key, model in bundle['models'].items():
+            threshold = bundle['report']['validation'][key]['threshold']
+            p = float(model.predict_proba(reference)[0, 1])
+            if not 0 <= p <= 1 or not 0 <= threshold <= 1:
+                raise ValueError('Modelo ou limiar inválido.')
+    return bundle
+
+
+def create_app(model_path: Path | None = None):
+    artifact = Path(model_path) if model_path is not None else Path(os.environ.get('RISK_BANK_MODEL', BASE_DIR / 'results/models.joblib'))
+
+    @asynccontextmanager
+    async def lifespan(application):
+        application.state.bundle = None
         try:
-            preprocessor_instance = joblib.load(prep_path)
-            checkpoint = torch.load(model_path, map_location=device, weights_only=False)
-            input_size = checkpoint.get("input_size", 33)
-            hidden_layers = checkpoint.get("hidden_layers", (128, 64, 32))
-            dropout = checkpoint.get("dropout", 0.30)
-            batch_norm = checkpoint.get("batch_norm", True)
-            activation = checkpoint.get("activation", "relu")
-            
-            mlp = MLP(
-                input_size=input_size,
-                hidden_layers=hidden_layers,
-                activation=activation,
-                dropout=dropout,
-                batch_norm=batch_norm,
-            )
-            mlp.load_state_dict(checkpoint["state_dict"])
-            mlp.eval()
-            model_instance = mlp
-            print("[INFO] Modelo PyTorch e Pré-processador carregados com sucesso de results/")
-        except Exception as e:
-            print(f"[AVISO] Erro ao carregar modelo treinado: {e}. Usando heurística.")
-            model_instance = None
-            preprocessor_instance = None
-    else:
-        print("[INFO] Modelo treinado ainda não encontrado em results/. Usando heurística calibrada.")
+            application.state.bundle = load_bundle(artifact)
+        except Exception:
+            logger.exception('Não foi possível carregar o modelo. Execute python train.py e reinicie a API.')
+        yield
 
-# Tenta carregar na inicialização do script
-carregar_modelo()
+    app = FastAPI(title='Risk Bank API', version='2.0.0', lifespan=lifespan)
+    app.state.bundle = None
 
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(_, error):
+        # NaN/Infinity na entrada não podem reaparecer em uma resposta JSON.
+        detail = [{key: item[key] for key in ('type', 'loc', 'msg')} for item in error.errors()]
+        return JSONResponse(status_code=422, content={'detail': detail})
 
-@app.on_event("startup")
-def startup_event():
-    carregar_modelo()
+    def get_bundle():
+        if app.state.bundle is None:
+            raise HTTPException(503, 'Modelo indisponível. Execute python train.py e reinicie o servidor.')
+        return app.state.bundle
 
+    @app.get('/health')
+    def health():
+        bundle = app.state.bundle
+        return {'status': 'ready' if bundle else 'not_ready', 'model_loaded': bundle is not None,
+                'selected_model': bundle['selected_model'] if bundle else None}
 
-def calcular_fatores(x: PredictRequest) -> List[Factor]:
-    """Calcula os fatores de explicabilidade que mais pesam na decisão."""
-    w = [0.55, 0.25, 0.15, 0.1, 0.08, 0.05]
-    c = lambda v: max(-1, min(6, v))
-    
-    # 1. Atrasos nos pagamentos
-    fat_atrasos = 0.9 * sum(w[i] * c(x.pay[i]) for i in range(6))
-    
-    # 2. Utilização do limite
-    util = min(1.5, max(0.0, x.bill[0] / x.limit)) if x.limit > 0 else 1.0
-    fat_util = 0.9 * (util - 0.4)
-    
-    # 3. Proporção paga da fatura anterior
-    ratio = min(1.0, x.paid[0] / x.bill[1]) if x.bill[1] > 0 else 1.0
-    fat_pago = -0.9 * (ratio - 0.15)
-    
-    # 4. Limite de crédito
-    fat_limite = -0.25 * np.log10(max(x.limit, 1000.0) / 50000.0)
-    
-    factors = [
-        Factor(name="Atrasos no pagamento", value=round(float(fat_atrasos), 3)),
-        Factor(name="Fatura atual vs. limite", value=round(float(fat_util), 3)),
-        Factor(name="Parcela paga da fatura anterior", value=round(float(fat_pago), 3)),
-        Factor(name="Limite de crédito", value=round(float(fat_limite), 3)),
-    ]
-    return factors
+    @app.get('/models')
+    def models():
+        bundle = get_bundle()
+        report = bundle['report']
+        return {'selected_model': bundle['selected_model'], 'reference_previously_used': 'research' in report, 'models': [
+            {'id': key, 'name': MODEL_NAMES[key], 'threshold': report['validation'][key]['threshold'],
+             'calibration_method': report.get('calibration_methods', {}).get(key, 'none'),
+             'test_metrics': report['test'][key]} for key in MODEL_NAMES]}
 
+    @app.get('/metrics')
+    def metrics():
+        return get_bundle()['report']
 
-@app.post("/predict", response_model=PredictResponse)
-def predict(req: PredictRequest):
-    """
-    Endpoint para calcular a probabilidade de inadimplência de crédito.
-    Recebe os dados do cliente e histórico de 6 meses.
-    """
-    try:
-        factors = calcular_fatores(req)
-        
-        # Se o modelo PyTorch treinado estiver disponível, executa inferência real
-        if model_instance is not None and preprocessor_instance is not None:
-            # Montar DataFrame com os 23 atributos na ordem correta
-            data = {
-                "LIMIT_BAL": [req.limit],
-                "SEX": [req.sex],
-                "EDUCATION": [req.edu],
-                "MARRIAGE": [req.mar],
-                "AGE": [req.age],
-                "PAY_0": [req.pay[0]],
-                "PAY_2": [req.pay[1]],
-                "PAY_3": [req.pay[2]],
-                "PAY_4": [req.pay[3]],
-                "PAY_5": [req.pay[4]],
-                "PAY_6": [req.pay[5]],
-                "BILL_AMT1": [req.bill[0]],
-                "BILL_AMT2": [req.bill[1]],
-                "BILL_AMT3": [req.bill[2]],
-                "BILL_AMT4": [req.bill[3]],
-                "BILL_AMT5": [req.bill[4]],
-                "BILL_AMT6": [req.bill[5]],
-                "PAY_AMT1": [req.paid[0]],
-                "PAY_AMT2": [req.paid[1]],
-                "PAY_AMT3": [req.paid[2]],
-                "PAY_AMT4": [req.paid[3]],
-                "PAY_AMT5": [req.paid[4]],
-                "PAY_AMT6": [req.paid[5]],
-            }
-            df = pd.DataFrame(data)
-            X_proc = preprocessor_instance.transform(df)
-            X_proc = np.asarray(X_proc, dtype=np.float32)
-            X_tensor = torch.tensor(X_proc, dtype=torch.float32).to(device)
+    @app.post('/predict', response_model=PredictResponse)
+    def predict(req: PredictRequest):
+        bundle = get_bundle()
+        key = req.model or bundle['selected_model']
+        model = bundle['models'][key]
+        frame = req.to_frame()
+        alternatives = [frame]
+        for _, columns in FACTOR_GROUPS:
+            alternative = frame.copy()
+            for col in columns:
+                alternative[col] = bundle['reference'][col]
+            alternatives.append(alternative)
+        try:
+            with threadpool_limits(limits=2):
+                probabilities = model.predict_proba(pd.concat(alternatives, ignore_index=True))[:, 1]
+            if not np.isfinite(probabilities).all() or ((probabilities < 0) | (probabilities > 1)).any():
+                raise ValueError('Probabilidades inválidas.')
+        except Exception as error:
+            logger.exception('Falha na inferência do modelo %s.', key)
+            raise HTTPException(500, 'Não foi possível calcular a previsão. Consulte o log do servidor.') from error
+        probability = float(probabilities[0])
+        threshold = req.threshold if req.threshold is not None else bundle['report']['validation'][key]['threshold']
+        factors = [Factor(name=name, value=float(probability - probabilities[i + 1]))
+                   for i, (name, _) in enumerate(FACTOR_GROUPS)]
+        factors.sort(key=lambda factor: abs(factor.value), reverse=True)
+        return PredictResponse(prob=probability, prediction=int(probability >= threshold), threshold=threshold,
+                               factors=factors, model_id=key, model_used=MODEL_NAMES[key],
+                               explanation_method=EXPLANATION_METHOD)
 
-            with torch.no_grad():
-                logits = model_instance(X_tensor)
-                prob = float(torch.sigmoid(logits).cpu().numpy().flatten()[0])
+    @app.get('/')
+    def index():
+        return FileResponse(BASE_DIR / 'index.html')
 
-            model_name = "MLP Profunda Regularizada (PyTorch)"
-        else:
-            # Heurística calibrada com a sigmoide
-            score = -1.45 + sum(f.value for f in factors)
-            prob = float(1.0 / (1.0 + np.exp(-score)))
-            model_name = "Heurística Calibrada (Modo Demonstração)"
+    @app.get('/app.js')
+    def javascript():
+        return FileResponse(BASE_DIR / 'app.js', media_type='application/javascript')
 
-        prob = max(0.01, min(0.99, prob))
-        return PredictResponse(
-            prob=round(prob, 4),
-            factors=factors,
-            model_used=model_name,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro no processamento da predição: {str(e)}")
+    @app.get('/style.css')
+    def stylesheet():
+        return FileResponse(BASE_DIR / 'style.css', media_type='text/css')
+
+    return app
 
 
-@app.get("/health")
-def health_check():
-    return {
-        "status": "online",
-        "model_loaded": model_instance is not None,
-    }
+app = create_app()
 
-
-# Rotas para servir o frontend
-@app.get("/")
-def get_index():
-    return FileResponse(BASE_DIR / "index.html")
-
-@app.get("/style.css")
-def get_css():
-    return FileResponse(BASE_DIR / "style.css", media_type="text/css")
-
-@app.get("/app.js")
-def get_js():
-    return FileResponse(BASE_DIR / "app.js", media_type="application/javascript")
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     import uvicorn
-    print("\n" + "=" * 60)
-    print("Iniciando Risk Bank Server...")
-    print("Acesse localmente em:  http://localhost:8000")
-    print("Acesse em outro PC/celular (LAN): http://192.168.1.29:8000")
-    print("Documentação da API:   http://localhost:8000/docs")
-    print("=" * 60 + "\n")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run('server:app', host='127.0.0.1', port=8000)
