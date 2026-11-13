@@ -1,27 +1,6 @@
-# ============================================================
-# PREVISÃO DE INADIMPLÊNCIA DE CARTÃO DE CRÉDITO
-# Projeto de Inteligência Artificial
-#
-# Modelos:
-#   - kNN L1
-#   - kNN L2
-#   - Logistic Regression
-#   - Linear SVM
-#   - MLP superficial
-#   - MLP profundo regularizado
-#
-# Experimentos:
-#   - Funções de ativação
-#   - Dropout
-#   - L2
-#   - Batch Normalization
-#   - Diferentes seeds
-#
-# Dataset:
-#   Default of Credit Card Clients - UCI
-# ============================================================
 
 import os
+import sys
 import random
 import warnings
 
@@ -53,6 +32,15 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
 warnings.filterwarnings("ignore")
+
+if "--serve" in sys.argv or "-s" in sys.argv:
+    import uvicorn
+    from server import app
+    print("\nIniciando Risk Bank Server via main.py...")
+    print("Acesse localmente em:  http://localhost:8000")
+    print("Acesse via IP local:   http://192.168.1.29:8000\n")
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+    sys.exit(0)
 
 
 # ============================================================
@@ -132,9 +120,26 @@ def carregar_dataset():
         print("Erro:", erro)
         print()
 
-        caminho = input(
-            "Digite o caminho para o arquivo CSV/XLS/XLSX: "
-        )
+        # Procura arquivos locais compatíveis antes de bloquear no input
+        import glob
+        arquivos_locais = glob.glob("*.csv") + glob.glob("*.xls") + glob.glob("*.xlsx")
+        candidatos = [f for f in arquivos_locais if "credit" in f.lower() or "default" in f.lower()]
+
+        caminho = candidatos[0] if candidatos else None
+        if caminho:
+            print(f"Dataset local encontrado: {caminho}")
+        else:
+            try:
+                caminho = input(
+                    "Digite o caminho para o arquivo CSV/XLS/XLSX (ou Enter para dados sintéticos): "
+                ).strip()
+            except (EOFError, KeyboardInterrupt):
+                caminho = ""
+
+        if not caminho:
+            print("Nenhum arquivo informado. Gerando dados sintéticos compatíveis para teste...")
+            from p4_mlp_offline import gerar_dataset_sintetico
+            return gerar_dataset_sintetico()
 
         if caminho.endswith(".csv"):
 
@@ -214,7 +219,7 @@ print(X.isnull().sum().sum())
 
 
 # ============================================================
-# 5. REMOVER ID
+# 5. REMOVER ID E PADRONIZAR NOMES DAS COLUNAS
 # ============================================================
 
 if "ID" in X.columns:
@@ -223,6 +228,37 @@ if "ID" in X.columns:
 
     print()
     print("Coluna ID removida.")
+
+# Mapeamento oficial das variáveis da UCI (caso venham como X1..X23)
+MAPA_COLUNAS_UCI = {
+    "X1": "LIMIT_BAL",
+    "X2": "SEX",
+    "X3": "EDUCATION",
+    "X4": "MARRIAGE",
+    "X5": "AGE",
+    "X6": "PAY_0",
+    "X7": "PAY_2",
+    "X8": "PAY_3",
+    "X9": "PAY_4",
+    "X10": "PAY_5",
+    "X11": "PAY_6",
+    "X12": "BILL_AMT1",
+    "X13": "BILL_AMT2",
+    "X14": "BILL_AMT3",
+    "X15": "BILL_AMT4",
+    "X16": "BILL_AMT5",
+    "X17": "BILL_AMT6",
+    "X18": "PAY_AMT1",
+    "X19": "PAY_AMT2",
+    "X20": "PAY_AMT3",
+    "X21": "PAY_AMT4",
+    "X22": "PAY_AMT5",
+    "X23": "PAY_AMT6",
+}
+
+if any(col in X.columns for col in MAPA_COLUNAS_UCI):
+    X = X.rename(columns=MAPA_COLUNAS_UCI)
+    print("Colunas renomeadas para a nomenclatura semântica (LIMIT_BAL, SEX, etc.).")
 
 
 # ============================================================
@@ -447,6 +483,7 @@ knn_l1 = KNeighborsClassifier(
     n_neighbors=15,
     p=1,
     weights="distance",
+    n_jobs=-1,
 )
 
 knn_l1.fit(
@@ -475,6 +512,7 @@ knn_l2 = KNeighborsClassifier(
     n_neighbors=15,
     p=2,
     weights="distance",
+    n_jobs=-1,
 )
 
 knn_l2.fit(
@@ -679,6 +717,7 @@ def treinar_mlp(
         dataset,
         batch_size=BATCH_SIZE,
         shuffle=True,
+        drop_last=True,
     )
 
     # ========================================================
@@ -1065,7 +1104,7 @@ print(
 
 
 # ============================================================
-# 20. SALVAR RESULTADOS
+# 20. SALVAR RESULTADOS E MODELOS
 # ============================================================
 
 os.makedirs(
@@ -1078,6 +1117,25 @@ df_resultados.to_csv(
     "results/resultados.csv",
     index=False,
 )
+
+import joblib
+
+joblib.dump(preprocessor, "results/preprocessor.joblib")
+
+torch.save({
+    "state_dict": mlp_profunda.state_dict(),
+    "input_size": X_train_processed.shape[1],
+    "hidden_layers": (128, 64, 32),
+    "activation": "relu",
+    "dropout": 0.30,
+    "batch_norm": True,
+    "colunas_numericas": colunas_numericas,
+    "colunas_categoricas": colunas_categoricas,
+}, "results/mlp_profunda.pt")
+
+print("Artefatos de inferência salvos com sucesso em results/:")
+print("  - results/preprocessor.joblib")
+print("  - results/mlp_profunda.pt")
 
 
 # ============================================================

@@ -6,3 +6,6 @@ openpyxl
 xlrd
 ucimlrepo
 torch
+fastapi
+uvicorn
+joblib

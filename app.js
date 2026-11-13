@@ -25,9 +25,34 @@ function read(){
   return {limit:n("limit"),age:n("age"),sex:n("sex"),edu:n("edu"),mar:n("mar"),pay:r("pay"),bill:r("bill"),paid:r("paid")};
 }
 
-/* Substitua pela chamada ao modelo treinado (ex.: fetch("/predict", ...)).
-   Retorna {prob: 0..1, factors: [{name, value}]}; value > 0 aumenta o risco. */
-function predict(x){
+/* Conecta ao backend (/predict) ou usa heurística local se offline */
+async function predict(x){
+  const endpoints = ["/predict", "http://localhost:8000/predict", "http://127.0.0.1:8000/predict"];
+  
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(x),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const note = document.querySelector(".note");
+        if (note) {
+          note.innerHTML = `<strong>Conectado ao Backend (${data.model_used || "API"}).</strong> Previsão calculada em tempo real.`;
+          note.style.borderColor = "#107c41";
+          note.style.background = "#e6f4ea";
+          note.style.color = "#137333";
+        }
+        return data;
+      }
+    } catch (e) {
+      // Tenta próximo endpoint ou cai no fallback
+    }
+  }
+
+  // Fallback heurístico caso o backend não esteja ativo
   const w=[0.55,0.25,0.15,0.1,0.08,0.05], c=v=>Math.max(-1,Math.min(6,v)), f=[];
   f.push({name:"Atrasos no pagamento",value:0.9*x.pay.reduce((s,p,i)=>s+w[i]*c(p),0)});
   const util=x.limit>0?Math.min(1.5,Math.max(0,x.bill[0]/x.limit)):1;
@@ -58,9 +83,9 @@ function renderClassification(prob) {
   return bad;
 }
 
-function analyze(){
+async function analyze(){
   const x = read();
-  const {prob, factors} = predict(x);
+  const {prob, factors} = await predict(x);
   lastProbability = prob;
   const p = Math.round(prob * 100);
   $("pct").textContent = p + "%";
@@ -76,13 +101,15 @@ const PRESETS={
   good:{limit:200000,age:42,pay:[-1,-1,-1,-1,-1,-1],bill:[12000,11000,9000,10000,8000,9500],paid:[12000,11000,9000,10000,8000,9500]},
   bad:{limit:30000,age:27,pay:[3,3,2,2,2,0],bill:[29500,28000,27000,26000,25000,22000],paid:[0,0,1000,0,500,1500]}
 };
-document.querySelectorAll("[data-preset]").forEach(b=>b.onclick=()=>{
+document.querySelectorAll("[data-preset]").forEach(b=>b.onclick=async ()=>{
   const p=PRESETS[b.dataset.preset]; $("limit").value=p.limit; $("age").value=p.age;
-  MESES.forEach((_,i)=>{$("pay"+i).value=p.pay[i];$("bill"+i).value=p.bill[i];$("paid"+i).value=p.paid[i];}); chart(); analyze();
+  MESES.forEach((_,i)=>{$("pay"+i).value=p.pay[i];$("bill"+i).value=p.bill[i];$("paid"+i).value=p.paid[i];});
+  chart();
+  await analyze();
 });
 document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",()=>{if(e.id!=="thr")chart();}));
-$("run").onclick = () => {
-  analyze();
+$("run").onclick = async () => {
+  await analyze();
   if (window.matchMedia("(max-width: 980px)").matches) location.hash = "#analises";
 };
 $("thr").oninput=e=>{$("thv").textContent=e.target.value+"%"; if(lastProbability !== undefined) renderClassification(lastProbability);};
